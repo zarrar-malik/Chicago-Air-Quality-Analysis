@@ -1,10 +1,10 @@
-# Chicago_Air_Quality_Premium_Analysis.py
+# Chicago_Air_Quality_Analysis.py
 """
 Chicago Air Quality Analysis (2000-2002)
 Premium Edition with Advanced Visualizations
 
 Author: Zarrar Malik
-Date: [Current Date]
+Date: 08/30/2025
 
 A sophisticated analysis of Chicago air quality data with unique visualizations
 and professional presentation standards.
@@ -38,16 +38,16 @@ def set_custom_style():
     
     # Define custom color palette
     colors = {
-        'pm25': '#E63946',     # Vibrant red
-        'pm10': '#457B9D',     # Deep blue
-        'o3': '#FCA311',       # Golden yellow
-        'no2': '#588157',      # Forest green
-        'background': '#F8F9FA', # Light background
+        'pm25': '#E63946',     # Red
+        'pm10': '#457B9D',     # Blue
+        'o3': '#FCA311',       # Yellow
+        'no2': '#588157',      # Green
+        'background': '#F8F9FA', # Background
         'text': '#343A40',     # Dark text
-        'dark_pm25': '#A62633', # Darker red
-        'dark_pm10': '#315B79', # Darker blue
-        'dark_o3': '#C5820E',   # Darker yellow
-        'dark_no2': '#406545'   # Darker green
+        'dark_pm25': '#A62633', # Dark red
+        'dark_pm10': '#315B79', # Dark blue
+        'dark_o3': '#C5820E',   # Dark yellow
+        'dark_no2': '#406545'   # Dark green
     }
     
     return colors
@@ -64,16 +64,16 @@ def load_and_preprocess_data():
     # Set date as index
     df.set_index("date", inplace=True)
     
-    # Create a DataFrame with all pollutants
+    # Create a DataFrame with pollutants
     air_data = df[['pm25tmean2', 'pm10tmean2', 'o3tmean2', 'no2tmean2']].copy()
-    air_data.columns = ['pm25', 'pm10', 'o3', 'no2']  # Rename for consistency
+    air_data.columns = ['pm25', 'pm10', 'o3', 'no2']  # Renaming
     
     # Reset index to have date as a column for processing
     air_data = air_data.reset_index()
     
     return air_data
 
-# Create premium visualizations
+# Create visualizations
 def create_premium_visualizations(air_data, colors):
     """Create sophisticated, professional visualizations"""
     
@@ -292,11 +292,11 @@ def main():
         percentage = (count / len(air_data)) * 100
         print(f"   - {name}: {count} days ({percentage:.1f}%)")
     
-    # Create premium visualizations
+    # Create Visualizations
     print("\n🎨 Creating premium visualizations...")
     create_premium_visualizations(air_data, colors)
     
-    # Generate professional report
+    # Generate Report
     print("📝 Generating professional report...")
     generate_professional_report(air_data)
     
