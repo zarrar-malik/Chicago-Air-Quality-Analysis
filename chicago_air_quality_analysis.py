@@ -1,317 +1,316 @@
-# Chicago_Air_Quality_Analysis.py
 """
 Chicago Air Quality Analysis (2000-2002)
-Premium Edition with Advanced Visualizations
-
 Author: Zarrar Malik
-Date: 08/30/2025
-
-A sophisticated analysis of Chicago air quality data with unique visualizations
-and professional presentation standards.
+Date: 2025-08-30
 """
 
+import os
 import numpy as np
 import pandas as pd
-import warnings
-warnings.filterwarnings('ignore')
-
-# Import visualization libraries
-import joypy
 import matplotlib.pyplot as plt
-from matplotlib import dates as mdates
-from scipy import stats
 import calendar
+import warnings
+from scipy.stats import kendalltau
+from statsmodels.tsa.seasonal import seasonal_decompose
+import joypy
+import seaborn as sns
 
-# Set custom style for all visualizations
+warnings.filterwarnings("ignore")
+np.random.seed(42)
+
+# Config / filenames
+INPUT_CSV = "chicago_air_pollution.csv"   
+OUT_TIMESERIES = "pollutants_timeseries_zarrar.png"
+OUT_JOYPLOT = "monthly_pm25_distribution_zarrar.png"
+OUT_SEASONAL = "seasonal_analysis_zarrar.png"
+OUT_BOX = "monthly_boxplot_pm25_zarrar.png"
+OUT_REPORT = "chicago_air_quality_report_zarrar.md"
+
+# style
 def set_custom_style():
-    """Set a custom professional style for visualizations"""
-    plt.style.use('default')
+    sns.set_style("whitegrid")  # Using seaborns whitegrid theme 
     plt.rcParams['font.family'] = 'sans-serif'
-    plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans', 'Liberation Sans']
-    plt.rcParams['axes.grid'] = True
-    plt.rcParams['grid.alpha'] = 0.3
     plt.rcParams['axes.facecolor'] = '#F8F9FA'
     plt.rcParams['figure.facecolor'] = '#F8F9FA'
-    plt.rcParams['axes.edgecolor'] = '#343A40'
-    plt.rcParams['axes.labelcolor'] = '#343A40'
-    plt.rcParams['text.color'] = '#343A40'
-    
-    # Define custom color palette
+    plt.rcParams['grid.alpha'] = 0.25
     colors = {
-        'pm25': '#E63946',     # Red
-        'pm10': '#457B9D',     # Blue
-        'o3': '#FCA311',       # Yellow
-        'no2': '#588157',      # Green
-        'background': '#F8F9FA', # Background
-        'text': '#343A40',     # Dark text
-        'dark_pm25': '#A62633', # Dark red
-        'dark_pm10': '#315B79', # Dark blue
-        'dark_o3': '#C5820E',   # Dark yellow
-        'dark_no2': '#406545'   # Dark green
+        'pm25': '#E63946',
+        'pm10': '#457B9D',
+        'o3': '#FCA311',
+        'no2': '#588157',
+        'background': '#F8F9FA',
+        'text': '#343A40',
+        'dark_pm25': '#A62633',
+        'dark_pm10': '#315B79',
+        'dark_o3': '#C5820E',
+        'dark_no2': '#406545'
     }
-    
     return colors
 
-# Load and preprocess the data for 2000-2002
-def load_and_preprocess_data():
-    """Load and preprocess the Chicago air pollution dataset for 2000-2002"""
-    # Load the dataset
-    df = pd.read_csv("chicago_air_pollution.csv", parse_dates=["date"])
-    
-    # Filter for 2000-2002
-    df = df[(df['date'].dt.year >= 2000) & (df['date'].dt.year <= 2002)]
-    
-    # Set date as index
-    df.set_index("date", inplace=True)
-    
-    # Create a DataFrame with pollutants
-    air_data = df[['pm25tmean2', 'pm10tmean2', 'o3tmean2', 'no2tmean2']].copy()
-    air_data.columns = ['pm25', 'pm10', 'o3', 'no2']  # Renaming
-    
-    # Reset index to have date as a column for processing
-    air_data = air_data.reset_index()
-    
-    return air_data
+# loading and preprocessor
+def find_date_column(df):
+    """Find a likely date column (case-insensitive)."""
+    candidates = [c for c in df.columns if c.lower() in ('date', 'datetime', 'time', 'day')]
+    if candidates:
+        return candidates[0]
+    # fallback: try columns that look like dates by dtype
+    for c in df.columns:
+        if np.issubdtype(df[c].dtype, np.datetime64):
+            return c
+    return None
 
-# Create visualizations
-def create_premium_visualizations(air_data, colors):
-    """Create sophisticated, professional visualizations"""
-    
-    # 1. Multi-panel time series with custom design
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Chicago Air Quality Analysis (2000-2002)\nBy Zarrar Malik', 
-                 fontsize=20, color=colors['text'], fontweight='bold')
-    
-    pollutants = ['pm25', 'pm10', 'o3', 'no2']
+def find_pollutant_column(df, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    # try case-insensitive match
+    low = {col.lower(): col for col in df.columns}
+    for c in candidates:
+        if c.lower() in low:
+            return low[c.lower()]
+    return None
+
+def load_and_preprocess_data(path=INPUT_CSV, start_year=2000, end_year=2002):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Input CSV not found: {path}")
+
+    # read without enforcing parse_dates (will detect)
+    df = pd.read_csv(path, low_memory=False)
+
+    # detect date column and parse it
+    date_col = find_date_column(df)
+    if date_col is None:
+        raise ValueError("No date column found in the input CSV. Please include a date column named 'date' or similar.")
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce', infer_datetime_format=True)
+    df = df.dropna(subset=[date_col])
+    df = df.rename(columns={date_col: 'date'})
+
+    # filter years
+    df = df[(df['date'].dt.year >= start_year) & (df['date'].dt.year <= end_year)]
+
+    # find pollutant columns with fallbacks
+    pm25_col = find_pollutant_column(df, ['pm25tmean2', 'pm25', 'PM2.5', 'pm25_mean'])
+    pm10_col = find_pollutant_column(df, ['pm10tmean2', 'pm10', 'PM10'])
+    o3_col   = find_pollutant_column(df, ['o3tmean2', 'o3', 'O3'])
+    no2_col  = find_pollutant_column(df, ['no2tmean2', 'no2', 'NO2'])
+
+    # create a DataFrame, fill missing columns with NaN
+    air = pd.DataFrame({'date': df['date']})
+    air['pm25'] = df[pm25_col] if pm25_col in df.columns else np.nan
+    air['pm10'] = df[pm10_col] if pm10_col in df.columns else np.nan
+    air['o3']   = df[o3_col]   if o3_col   in df.columns else np.nan
+    air['no2']  = df[no2_col]  if no2_col  in df.columns else np.nan
+
+    # report what columns were used
+    used = {
+        'pm25': pm25_col, 'pm10': pm10_col, 'o3': o3_col, 'no2': no2_col
+    }
+    print("Detected pollutant columns:", used)
+    return air
+
+# stats
+def data_availability_report(air):
+    n_total = len(air)
+    report = {}
+    for col in ['pm25','pm10','o3','no2']:
+        count = int(air[col].count())
+        report[col] = {'count': count, 'pct': 100 * count / max(1, n_total)}
+    return report
+
+def trend_test_kendall(series):
+    # series: pandas Series indexed by date or int; must drop NaNs
+    s = series.dropna().reset_index(drop=True)
+    if len(s) < 8:
+        return {'tau': np.nan, 'p': np.nan, 'n': len(s)}
+    tau, p = kendalltau(np.arange(len(s)), s.values)
+    return {'tau': float(tau), 'p': float(p), 'n': len(s)}
+
+# Visualizations
+def create_visualizations(air, colors):
+    pollutants = ['pm25','pm10','o3','no2']
     titles = ['PM2.5 (µg/m³)', 'PM10 (µg/m³)', 'Ozone (ppm)', 'Nitrogen Dioxide (ppb)']
-    poll_colors = [colors['pm25'], colors['pm10'], colors['o3'], colors['no2']]
-    dark_colors = [colors['dark_pm25'], colors['dark_pm10'], colors['dark_o3'], colors['dark_no2']]
-    
-    for i, (pollutant, title, color, dark_color) in enumerate(zip(pollutants, titles, poll_colors, dark_colors)):
+    darks = [colors['dark_pm25'], colors['dark_pm10'], colors['dark_o3'], colors['dark_no2']]
+    cols = [colors['pm25'], colors['pm10'], colors['o3'], colors['no2']]
+
+    # ensure date is datetime
+    air['date'] = pd.to_datetime(air['date'])
+    air = air.sort_values('date').reset_index(drop=True)
+
+    # Multi-panel time series
+    fig, axes = plt.subplots(2,2, figsize=(16,12))
+    fig.suptitle('Chicago Air Quality (2000–2002) — Zarrar Malik', fontsize=20, weight='bold', color=colors['text'])
+    for i, (poll, title, color, dark) in enumerate(zip(pollutants, titles, cols, darks)):
         ax = axes[i//2, i%2]
-        ax.plot(air_data['date'], air_data[pollutant], alpha=0.7, color=color, linewidth=1.5)
-        
-        # Add a trend line (30-day moving average)
-        trend = air_data.set_index('date')[pollutant].rolling(window=30, min_periods=15).mean()
-        ax.plot(trend.index, trend.values, color=dark_color, linewidth=2.5, label='30-day Trend')
-        
-        # Customize the subplot
-        ax.set_title(title, fontsize=14, color=colors['text'], fontweight='bold')
+        ax.plot(air['date'], air[poll], color=color, alpha=0.6, linewidth=1)
+        # 30-day rolling trend
+        trend = air.set_index('date')[poll].rolling(window=30, min_periods=10).mean()
+        ax.plot(trend.index, trend.values, color=dark, linewidth=2.2, label='30-day trend')
+        # annotate top 5 peaks
+        if air[poll].dropna().size > 0:
+            top5 = air.nlargest(5, poll)[['date',poll]]
+            for _, row in top5.iterrows():
+                ax.scatter(row['date'], row[poll], color='k', s=20)
+                ax.annotate(int(round(row[poll],0)), (row['date'], row[poll]),
+                            textcoords="offset points", xytext=(0,6), ha='center', fontsize=8)
+        ax.set_title(title)
+        ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%b %Y'))
+        ax.xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=3))
+        ax.grid(True, alpha=0.25)
+        ax.legend()
         ax.set_facecolor(colors['background'])
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
-        ax.tick_params(axis='x', rotation=45)
-        ax.grid(True, alpha=0.3)
-        
-        # Add a subtle watermark
-        ax.text(0.02, 0.98, 'Zarrar Malik', transform=ax.transAxes, 
-                fontsize=8, alpha=0.2, verticalalignment='top',
-                color=colors['text'])
-    
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('premium_pollutants_timeseries.png', dpi=300, bbox_inches='tight', 
-                facecolor=colors['background'])
+        ax.text(0.02, 0.95, 'Zarrar Malik', transform=ax.transAxes, fontsize=8, alpha=0.25)
+
+    plt.tight_layout(rect=[0,0,1,0.95])
+    plt.savefig(OUT_TIMESERIES, dpi=300, bbox_inches='tight', facecolor=colors['background'])
     plt.close()
-    
-    # 2. Enhanced joyplot for seasonal patterns
-    air_data['month'] = air_data['date'].dt.month
-    air_data['month_name'] = air_data['date'].dt.month_name()
-    
-    # Order months chronologically
-    month_order = list(calendar.month_name)[1:]
-    air_data['month_name'] = pd.Categorical(air_data['month_name'], categories=month_order, ordered=True)
-    
-    # Create the joyplot without the backgroundcolor parameter
-    plt.figure(figsize=(12, 10))
-    fig, axes = joypy.joyplot(air_data, by='month_name', column='pm25', 
-                              colormap=plt.cm.plasma, fade=True, 
-                              overlap=2, linewidth=1.5, alpha=0.8,
-                              figsize=(12, 10))
-    
-    plt.title('Monthly Distribution of PM2.5 Levels in Chicago (2000-2002)\nBy Zarrar Malik', 
-              fontsize=16, color=colors['text'], fontweight='bold')
-    plt.xlabel("PM2.5 (µg/m³)", color=colors['text'], fontweight='bold')
-    
-    # Set the background color after creating the plot
-    fig.set_facecolor(colors['background'])
-    for ax in axes:
-        ax.set_facecolor(colors['background'])
-    
-    # Add custom watermark
-    plt.figtext(0.02, 0.02, 'Analysis by Zarrar Malik', fontsize=10, 
-                alpha=0.5, color=colors['text'])
-    
-    plt.savefig('premium_monthly_pm25_distribution.png', dpi=300, bbox_inches='tight',
-                facecolor=colors['background'])
+    print(f"Saved: {OUT_TIMESERIES}")
+
+    # Joyplot (monthly distributions) — PM2.5 only
+    air['month'] = air['date'].dt.month
+    air['month_name'] = air['date'].dt.strftime('%b')
+    # Ensure month ordering
+    month_order = [calendar.month_abbr[i] for i in range(1,13)]
+    air['month_name'] = pd.Categorical(air['month_name'], categories=month_order, ordered=True)
+
+    fig, axes = joypy.joyplot(air, by='month_name', column='pm25',
+                              colormap=plt.cm.plasma, overlap=1.8, linewidth=1.2,
+                              fade=True, figsize=(12,10))
+    plt.title('Monthly Distribution of PM2.5 (2000–2002) — Zarrar Malik', fontsize=16)
+    plt.xlabel('PM2.5 (µg/m³)')
+    plt.savefig(OUT_JOYPLOT, dpi=300, bbox_inches='tight', facecolor=colors['background'])
     plt.close()
-    
-    # 3. Combined seasonal analysis for all pollutants
-    air_data['season'] = air_data['date'].dt.month.map({
-        12: 'Winter', 1: 'Winter', 2: 'Winter',
-        3: 'Spring', 4: 'Spring', 5: 'Spring',
-        6: 'Summer', 7: 'Summer', 8: 'Summer',
-        9: 'Fall', 10: 'Fall', 11: 'Fall'
-    })
-    
-    # Calculate seasonal averages
-    seasonal_avg = air_data.groupby('season')[pollutants].mean()
-    
-    # Create a grouped bar chart
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
+    print(f"Saved: {OUT_JOYPLOT}")
+
+    # Boxplot of PM2.5 by month for a different viewpoint
+    plt.figure(figsize=(12,6))
+    ax = plt.gca()
+    air.boxplot(column='pm25', by='month_name', ax=ax, grid=False)
+    plt.suptitle('')
+    plt.title('Monthly PM2.5 Boxplot (2000–2002)')
+    plt.xlabel('')
+    plt.ylabel('PM2.5 (µg/m³)')
+    plt.xticks(rotation=45)
+    plt.savefig(OUT_BOX, dpi=300, bbox_inches='tight', facecolor=colors['background'])
+    plt.close()
+    print(f"Saved: {OUT_BOX}")
+
+    # Seasonal grouped bar chart
+    season_map = {12:'Winter',1:'Winter',2:'Winter',3:'Spring',4:'Spring',5:'Spring',
+                  6:'Summer',7:'Summer',8:'Summer',9:'Fall',10:'Fall',11:'Fall'}
+    air['season'] = air['date'].dt.month.map(season_map)
+    seasonal_avg = air.groupby('season')[pollutants].mean().reindex(['Winter','Spring','Summer','Fall'])
+    # Plot grouped bars
+    fig, ax = plt.subplots(figsize=(12,8))
     x = np.arange(len(seasonal_avg.index))
     width = 0.2
-    
-    for i, (pollutant, color, title) in enumerate(zip(pollutants, poll_colors, titles)):
-        ax.bar(x + i*width, seasonal_avg[pollutant], width, label=title, color=color, alpha=0.8)
-    
-    ax.set_xlabel('Season', fontweight='bold', color=colors['text'])
-    ax.set_ylabel('Concentration', fontweight='bold', color=colors['text'])
-    ax.set_title('Seasonal Air Quality Patterns in Chicago (2000-2002)\nBy Zarrar Malik', 
-                 fontsize=16, fontweight='bold', color=colors['text'])
-    ax.set_xticks(x + width * 1.5)
+    for i, poll in enumerate(pollutants):
+        ax.bar(x + i*width, seasonal_avg[poll], width, label=poll.upper())
+    ax.set_xticks(x + width*1.5)
     ax.set_xticklabels(seasonal_avg.index)
+    ax.set_ylabel('Avg concentration')
+    ax.set_title('Seasonal Averages by Pollutant (2000–2002)')
     ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_facecolor(colors['background'])
-    
-    # Add custom watermark
-    ax.text(0.02, 0.98, 'Zarrar Malik', transform=ax.transAxes, 
-            fontsize=10, alpha=0.2, verticalalignment='top',
-            color=colors['text'])
-    
-    plt.tight_layout()
-    plt.savefig('premium_seasonal_analysis.png', dpi=300, bbox_inches='tight',
-                facecolor=colors['background'])
+    plt.savefig(OUT_SEASONAL, dpi=300, bbox_inches='tight', facecolor=colors['background'])
     plt.close()
+    print(f"Saved: {OUT_SEASONAL}")
 
-# Generate a professional report with proper encoding
-def generate_professional_report(air_data):
-    """Generate a professional text report of findings"""
-    
-    # Calculate basic statistics
-    report = "# Chicago Air Quality Analysis Report (2000-2002)\n"
-    report += "## By Zarrar Malik\n\n"
-    
-    report += "### Executive Summary\n"
-    report += "This report analyzes air quality trends in Chicago from 2000 to 2002, " \
-              "focusing on four key pollutants: PM2.5, PM10, Ozone, and Nitrogen Dioxide. " \
-              "The analysis reveals seasonal patterns and trends that provide insights into " \
-              "urban air quality dynamics.\n\n"
-    
-    # Data overview
-    report += "### Data Overview\n"
-    report += f"- Analysis period: {air_data['date'].min().date()} to {air_data['date'].max().date()}\n"
-    report += f"- Total days analyzed: {len(air_data)}\n"
-    
-    # Data availability
-    report += "- Data availability by pollutant:\n"
-    for pollutant, name in zip(['pm25', 'pm10', 'o3', 'no2'], 
-                              ['PM2.5', 'PM10', 'Ozone', 'Nitrogen Dioxide']):
-        count = air_data[pollutant].count()
-        percentage = (count / len(air_data)) * 100
-        report += f"  - {name}: {count} days ({percentage:.1f}% coverage)\n"
-    report += "\n"
-    
-    # Key findings by pollutant
-    report += "### Key Findings by Pollutant\n"
-    
-    pollutants = ['pm25', 'pm10', 'o3', 'no2']
-    names = ['PM2.5', 'PM10', 'Ozone', 'Nitrogen Dioxide']
-    units = ['µg/m³', 'µg/m³', 'ppm', 'ppb']
-    
-    for pollutant, name, unit in zip(pollutants, names, units):
-        if air_data[pollutant].count() > 0:
-            stats = air_data[pollutant].agg(['mean', 'max', 'min', 'std'])
-            report += f"#### {name}\n"
-            report += f"- Average concentration: {stats['mean']:.1f} {unit}\n"
-            report += f"- Maximum concentration: {stats['max']:.1f} {unit}\n"
-            report += f"- Minimum concentration: {stats['min']:.1f} {unit}\n"
-            report += f"- Variability (standard deviation): {stats['std']:.1f} {unit}\n\n"
-    
-    # Seasonal analysis
-    report += "### Seasonal Patterns\n"
-    air_data['season'] = air_data['date'].dt.month.map({
-        12: 'Winter', 1: 'Winter', 2: 'Winter',
-        3: 'Spring', 4: 'Spring', 5: 'Spring',
-        6: 'Summer', 7: 'Summer', 8: 'Summer',
-        9: 'Fall', 10: 'Fall', 11: 'Fall'
-    })
-    
-    seasonal_avg = air_data.groupby('season')[pollutants].mean()
-    
-    for season in ['Winter', 'Spring', 'Summer', 'Fall']:
-        report += f"#### {season}\n"
-        for pollutant, name, unit in zip(pollutants, names, units):
-            if not pd.isna(seasonal_avg.loc[season, pollutant]):
-                report += f"- {name}: {seasonal_avg.loc[season, pollutant]:.1f} {unit}\n"
-        report += "\n"
-    
-    # Key insights
-    report += "### Key Insights\n"
-    report += "1. **Winter shows the highest levels of PM2.5 and Nitrogen Dioxide**, likely due to increased heating needs and temperature inversions that trap pollutants.\n"
-    report += "2. **Summer has the highest ozone levels**, which is typical as ozone formation is enhanced by sunlight and higher temperatures.\n"
-    report += "3. **PM10 levels remain relatively consistent across seasons**, suggesting more constant sources like road dust and construction activities.\n"
-    report += "4. **Spring and Fall show transitional patterns** with moderate levels of all pollutants.\n\n"
-    
-    # Conclusion
-    report += "### Conclusion\n"
-    report += "This analysis reveals distinct seasonal patterns in Chicago's air quality " \
-              "from 2000 to 2002. The visualizations and statistics provide a comprehensive " \
-              "view of how different pollutants vary throughout the year, offering insights " \
-              "for environmental planning and public health initiatives.\n\n"
-    
-    report += "---\n"
-    report += "*Report generated using advanced Python analytics by Zarrar Malik*"
-    
-    # Save the report with proper encoding
-    with open('chicago_air_quality_report.md', 'w', encoding='utf-8') as f:
-        f.write(report)
+# Decomposition and trend test
+def decomposition_and_trend(air):
+    out = {}
+    # pm25 (daily series)
+    pm25 = air.set_index('date')['pm25'].dropna()
+    if pm25.empty:
+        return {'decomp': None, 'trend_test': None}
+    # resample to daily full index (fills gaps with NaN)
+    pm25_daily = pm25.resample('D').mean()
+    # simple interpolation (advisory: document this)
+    pm25_daily_interp = pm25_daily.interpolate(limit=7)
+    # seasonal_decompose requires at least two seasons; for daily data, period ~365
+    try:
+        decomposition = seasonal_decompose(pm25_daily_interp, model='additive', period=365, extrapolate_trend='freq')
+        out['decomp'] = decomposition
+    except Exception:
+        out['decomp'] = None
+    # trend test (Kendall)
+    tt = trend_test_kendall(pm25_daily_interp.dropna())
+    out['trend_test'] = tt
+    return out
+
+# Report generation
+def generate_report(air, availability, decomp_res):
+    # header
+    md = "# Chicago Air Quality Analysis Report (2000–2002)\n"
+    md += "#### By Zarrar Malik for UChicago Programming Supplement\n\n"
+    md += "## Summary\nThis analysis examines PM2.5, PM10, O3, and NO2 in Chicago (2000–2002). Visualizations and statistics are saved as PNGs.\n\n"
+
+    md += "## Data Overview\n"
+    md += f"- Period: {air['date'].min().date()} to {air['date'].max().date()}\n"
+    md += f"- Days analyzed: {len(air)}\n\n"
+    md += "## Data availability\n"
+    for k, v in availability.items():
+        md += f"- {k.upper()}: {v['count']} days ({v['pct']:.1f}% coverage)\n"
+    md += "\n"
+
+    md += "## Peak concentrations (Top 5 days by pollutant)\n"
+    for poll in ['pm25','pm10','o3','no2']:
+        if air[poll].dropna().empty:
+            continue
+        top5 = air.nlargest(5, poll)[['date', poll]]
+        md += f"### {poll.upper()}\n"
+        for _, r in top5.iterrows():
+            md += f"- {r['date'].date()}: {r[poll]:.2f}\n"
+        md += "\n"
+
+    # trend test
+    md += "## Trend test (Kendall tau) for PM2.5\n"
+    tt = decomp_res.get('trend_test') if decomp_res else None
+    if tt:
+        md += f"- Observations: {tt['n']}\n"
+        md += f"- Kendall tau: {tt['tau']:.3f}\n"
+        md += f"- p-value: {tt['p']:.3f}\n"
+        if not np.isnan(tt['p']) and tt['p'] < 0.05:
+            md += "- Interpretation: statistically significant monotonic trend detected (p < 0.05)\n\n"
+        else:
+            md += "- Interpretation: no statistically significant monotonic trend detected (p >= 0.05)\n\n"
+    else:
+        md += "- Not enough data for trend testing.\n\n"
+
+    md += "## Notes & Methods\n"
+    md += "- Missing daily values were interpolated for decomposition/visualization only (limit=7 days). All such decisions are documented.\n"
+    md += "- Seasonal decomposition (additive) was attempted for PM2.5 to separate trend/seasonality/residuals.\n\n"
+    md += "## Files generated\n"
+    md += f"- {OUT_TIMESERIES}\n- {OUT_JOYPLOT}\n- {OUT_BOX}\n- {OUT_SEASONAL}\n\n"
+    md += "---\n*Report generated with Python by Zarrar Malik*\n"
+
+    with open(OUT_REPORT, 'w', encoding='utf-8') as f:
+        f.write(md)
+    print(f"Saved: {OUT_REPORT}")
 
 def main():
-    """Execute the premium analysis pipeline"""
-    print("🚀 Chicago Air Quality Analysis - Premium Edition (2000-2002)")
-    print("=============================================================")
-    print("By Zarrar Malik")
-    print()
-    
-    # Set custom style
+    print("Chicago Air Quality Analysis (2000–2002) — Created By: Zarrar Malik")
     colors = set_custom_style()
-    
-    # Load and preprocess data
-    air_data = load_and_preprocess_data()
-    
-    print(f"📊 Loaded {len(air_data)} days of air quality data")
-    print(f"📅 Date range: {air_data['date'].min().date()} to {air_data['date'].max().date()}")
-    
-    # Count available data for each pollutant
-    print("\n📈 Data Availability by Pollutant:")
-    for pollutant, name in zip(['pm25', 'pm10', 'o3', 'no2'], 
-                              ['PM2.5', 'PM10', 'Ozone', 'Nitrogen Dioxide']):
-        count = air_data[pollutant].count()
-        percentage = (count / len(air_data)) * 100
-        print(f"   - {name}: {count} days ({percentage:.1f}%)")
-    
-    # Create Visualizations
-    print("\n🎨 Creating premium visualizations...")
-    create_premium_visualizations(air_data, colors)
-    
-    # Generate Report
-    print("📝 Generating professional report...")
-    generate_professional_report(air_data)
-    
-    print("\n✅ Premium analysis complete!")
-    print("\n📁 Generated Files:")
-    print("   - premium_pollutants_timeseries.png (Multi-panel time series)")
-    print("   - premium_monthly_pm25_distribution.png (Enhanced joyplot)")
-    print("   - premium_seasonal_analysis.png (Seasonal analysis chart)")
-    print("   - chicago_air_quality_report.md (Professional report)")
-    
-    print("\n🌟 This analysis showcases:")
-    print("   - Custom-designed visualizations with professional aesthetics")
-    print("   - Personalized branding with your name on all outputs")
-    print("   - Advanced analytical techniques beyond standard approaches")
-    print("   - Comprehensive reporting with executive summary and key findings")
+    air = load_and_preprocess_data(INPUT_CSV)
+    print(f"Loaded {len(air)} rows: {air['date'].min().date()} to {air['date'].max().date()}\n")
+
+    availability = data_availability_report(air)
+    for k,v in availability.items():
+        print(f"{k.upper():5s}: {v['count']:4d} days ({v['pct']:.1f}%)")
+
+    # Visualizations
+    create_visualizations(air, colors)
+
+    # Trend and decomposition
+    decomp_res = decomposition_and_trend(air)
+
+    # Report
+    generate_report(air, availability, decomp_res)
+
+    print("\nDone. Generated files:")
+    print(f" - {OUT_TIMESERIES}")
+    print(f" - {OUT_JOYPLOT}")
+    print(f" - {OUT_BOX}")
+    print(f" - {OUT_SEASONAL}")
+    print(f" - {OUT_REPORT}")
 
 if __name__ == "__main__":
     main()
